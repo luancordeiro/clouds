@@ -7,89 +7,10 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from sklearn.linear_model import LinearRegression
 from raman_data import RamanData
+from aux_funcs import *
 
 plt.rcParams["figure.figsize"] = (9, 6)
 plt.rcParams.update({'font.family': 'serif', 'font.size': 14, 'font.weight': 'light'})
-
-
-def mean_squared_deviation(x: np.array, s: np.array) -> float:
-    return np.sqrt(np.mean(((x - s) / s) ** 2))
-
-
-def mean_deviation(x: np.array, s: np.array) -> np.ndarray:
-    return np.mean((x - s) / s)
-
-
-def diff_(y: np.array, x: np.array, window: int = 1, *args, **kwargs):
-    diff = np.gradient(y[::window]) / np.gradient(x[::window])
-
-    new_diff = []
-    for ele in diff:
-        for _ in range(window):
-            new_diff.append(ele)
-
-            if len(new_diff) == len(x):
-                return np.array(new_diff)
-
-
-def diff_linear_regression(y: np.array, x: np.array, window: int = 5, weights: np.array = None):
-    def fit(init, final):
-        y_fit = y[init: final].reshape(-1, 1)
-        x_fit = x[init: final].reshape(-1, 1)
-
-        if weights is None:
-            linear_regession = LinearRegression().fit(x_fit, y_fit)
-        else:
-            weight_fit = weights[init: final]
-            linear_regession = LinearRegression().fit(x_fit, y_fit, sample_weight=weight_fit)
-
-        return linear_regession.coef_[0][0]
-
-    if window % 2 == 0:
-        raise ValueError("window must be odd.")
-
-    win = window // 2
-    diff_y = []
-    for i in range(win, len(y) - win - 10 - 1):
-        diff_y.append(fit(i - win, i + win + 1))
-#        if (i % 20 == 0) & (win <= window // 2 + 10):
-#            win += 2
-
-    for i in range(window // 2):
-        # diff_y.insert(i, fit(None, i + window // 2))
-        diff_y.insert(0, diff_y[0])
-
-    while len(diff_y) != len(y):
-        diff_y += [diff_y[-1]]
-
-    return np.array(diff_y)
-
-
-def diff_polyfit(y: np.array, x: np.array, window: int = 5, weights: np.array = None):
-    def fit(init, final):
-        y_fit = y[init: final]
-        x_fit = x[init: final]
-
-        return np.poly1d(np.polyfit(x_fit, y_fit, 3))
-
-    if window % 2 == 0:
-        raise ValueError("window must be odd.")
-
-    win = window // 2
-    diff_y = []
-    for i in range(win, len(y) - win - 10 - 1):
-        a, b, c, _ = fit(i - win, i + win + 1)
-        diff_y.append(3 * a * x[i] ** 2 + 2 * b * x[i] + c)
-
-    for i in range(window // 2):
-        diff_y.insert(0, diff_y[0])
-
-    while len(diff_y) != len(y):
-        diff_y += [diff_y[-1]]
-    
-    print(np.array(diff_y).shape)
-
-    return np.array(diff_y)
 
 
 class Raman:
@@ -173,10 +94,11 @@ class Raman:
         return self._diff_strategy(y, x, window=self._diff_window)
 
     def _alpha_elastic_aer(self) -> np.array:
-        N = self._raman_scatterer_numerical_density()
-        S = self._ranged_corrected_signal()
+        num_density = self._raman_scatterer_numerical_density()
+        range_corrected_signal = self._ranged_corrected_signal()
 
-        diff_num_signal = self._diff(N, self.z) / N - self._diff(S, self.z) / S
+        diff_num_signal = (self._diff(num_density, self.z) / num_density
+                           - self._diff(range_corrected_signal, self.z) / range_corrected_signal)
 
         return (diff_num_signal - self._alpha['elastic_mol'] - self._alpha['inelastic_mol']) / \
                (1 + (self.lidar_wavelength / self.raman_wavelength) ** self.angstrom_coeff)
@@ -200,7 +122,7 @@ class Raman:
 
         inelastic_signal = self.inelastic_signal if smoother is None else smoother(self.inelastic_signal)
 
-        signal_ratio = ((self._ref_value(inelastic_signal) * elastic_signal  /
+        signal_ratio = ((self._ref_value(inelastic_signal) * elastic_signal /
                         (self._ref_value(elastic_signal) * inelastic_signal)) *
                         (scatterer_numerical_density / self._ref_value(scatterer_numerical_density)))
 
@@ -208,7 +130,6 @@ class Raman:
                                     trapz(x=self.z[:self._ref], y=self._alpha_inelastic_total()[:self._ref])) /
                              np.exp(-cumtrapz(x=self.z, y=self._alpha_elastic_total(), initial=0) +
                                     trapz(x=self.z[:self._ref], y=self._alpha_elastic_total()[:self._ref])))
-
 
         beta_ref = self._ref_value(self._beta["elastic_mol"])
 
